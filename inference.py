@@ -5,6 +5,8 @@ import numpy as np
 import torch
 import cv2
 import warnings
+
+# replace this parts with the scripts
 from config import CONFIG
 from utils import get_image_paths, seeding, DATA_PATH
 from dataset import get_dataloaders
@@ -35,12 +37,15 @@ expanded_rows = []
 
 # Expand the dataframe by adding new rows for each file path
 for index, row in test_desc.iterrows():
-    image_paths = get_image_paths(row)
+    # print(index, row)
+    image_paths = get_image_paths(row, base_path)
     conditions = condition_mapping.get(row['series_description'], {})
     if isinstance(conditions, str):  # Single condition
         conditions = {'left': conditions, 'right': conditions}
     for side, condition in conditions.items():
+        print("side", side, condition, image_paths)
         for image_path in image_paths:
+            print(image_path)
             expanded_rows.append({
                 'study_id': row['study_id'],
                 'series_id': row['series_id'],
@@ -52,7 +57,7 @@ for index, row in test_desc.iterrows():
 
 # Create a new dataframe from the expanded rows
 expanded_test_desc = pd.DataFrame(expanded_rows)
-
+print(expanded_test_desc)
 test_data = expanded_test_desc.copy()
 test_data['target'] = 0
 test_data.head()

@@ -8,14 +8,17 @@ import torch
 import torchvision.transforms as transforms
 import pydicom
 
+from config import CONFIG
+
 tqdm.pandas()
 
 # DATA_PATH = Path("/kaggle/input/rsna-2024-lumbar-spine-degenerative-classification")
-DATA_PATH = Path("/mnt/Cache/rsna-2024-lumbar-spine-degenerative-classification")
-base_path = f"{str(DATA_PATH)}/train_images/"
+DATA_PATH = Path(CONFIG["data_path"])
 
 
-def get_image_paths(row):
+def get_image_paths(row, base_path=None):
+    if base_path is None:
+        base_path = f"{str(DATA_PATH)}/train_images/"
     series_path = os.path.join(base_path, str(row['study_id']), str(row['series_id']))
     if os.path.exists(series_path):
         return [

@@ -1,9 +1,9 @@
 from tqdm.auto import tqdm
 import torch
 import torch.nn as nn
+import timm
 import lightning as pl
 from config import CONFIG
-import timm
 
 import cv2
 

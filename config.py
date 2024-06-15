@@ -3,6 +3,8 @@ import torch
 CONFIG = dict(
     project_name="PL-RSNA-2024-Lumbar-Spine-Classification",
     weights_path="data/efficientnet_b0.ra_in1k.pth",
+    # data_path="/kaggle/input/rsna-2024-lumbar-spine-degenerative-classification",
+    data_path="/mnt/Cache/rsna-2024-lumbar-spine-degenerative-classification",
     artifact_name="rsnaEffNetModel",
     load_kernel=None,
     load_last=True,
