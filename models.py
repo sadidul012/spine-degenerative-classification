@@ -23,7 +23,7 @@ class TimmModel(nn.Module):
             drop_path_rate=CONFIG["drop_path_rate"],
             pretrained=pretrained
         )
-
+        hdim = 1
         if 'efficient' in backbone:
             hdim = self.encoder.conv_head.out_channels
             self.encoder.classifier = nn.Identity()
@@ -49,6 +49,10 @@ class TimmModel(nn.Module):
     def save_state_dict(self, path):
         torch.save(self.state_dict(), path)
 
+    def load_state_dict_from_path(self, path):
+        weights = torch.load(path)
+        self.load_state_dict(weights)
+
 
 class LumbarLightningModel(pl.LightningModule):
     def __init__(self, pretrained=False):
@@ -60,6 +64,9 @@ class LumbarLightningModel(pl.LightningModule):
 
     def save(self, path):
         self.model.save_state_dict(path)
+
+    def load(self, path):
+        self.model.load_state_dict_from_path(path)
 
     def forward(self, images):
         return self.model(images)
@@ -78,6 +85,11 @@ class LumbarLightningModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss = self.shared_step(batch)
         self.log("valid_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        loss = self.shared_step(batch)
+        self.log("test_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
     def configure_optimizers(self):

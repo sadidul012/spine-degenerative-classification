@@ -9,7 +9,7 @@ import warnings
 # replace this parts with the scripts
 from config import CONFIG
 from utils import get_image_paths, seeding, DATA_PATH
-from dataset import get_dataloaders
+from dataset import get_test_dataloaders
 from models import TimmModel
 
 warnings.filterwarnings("ignore")
@@ -20,8 +20,6 @@ seeding(CONFIG['seed'])
 os.listdir(DATA_PATH)
 sample_df = pd.read_csv(DATA_PATH / "sample_submission.csv")
 test_desc = pd.read_csv(DATA_PATH / "test_series_descriptions.csv")
-train_desc = pd.read_csv(DATA_PATH / "train_series_descriptions.csv")
-train_main = pd.read_csv(DATA_PATH / "train.csv")
 # define the base path for test images
 base_path = f"{str(DATA_PATH)}/test_images"
 
@@ -37,15 +35,12 @@ expanded_rows = []
 
 # Expand the dataframe by adding new rows for each file path
 for index, row in test_desc.iterrows():
-    # print(index, row)
     image_paths = get_image_paths(row, base_path)
     conditions = condition_mapping.get(row['series_description'], {})
     if isinstance(conditions, str):  # Single condition
         conditions = {'left': conditions, 'right': conditions}
     for side, condition in conditions.items():
-        print("side", side, condition, image_paths)
         for image_path in image_paths:
-            print(image_path)
             expanded_rows.append({
                 'study_id': row['study_id'],
                 'series_id': row['series_id'],
@@ -57,7 +52,7 @@ for index, row in test_desc.iterrows():
 
 # Create a new dataframe from the expanded rows
 expanded_test_desc = pd.DataFrame(expanded_rows)
-print(expanded_test_desc)
+# print(expanded_test_desc.to_string())
 test_data = expanded_test_desc.copy()
 test_data['target'] = 0
 test_data.head()
@@ -111,7 +106,7 @@ weights = torch.load(weights_path, map_location=torch.device("cpu"))
 model = TimmModel(backbone=CONFIG["backbone"], pretrained=False)
 model.load_state_dict(weights)
 
-dls = get_dataloaders(test_data, CONFIG, split="test")
+dls = get_test_dataloaders(test_data, CONFIG)
 # inference_loop(model, dls)
 tta_inference_loop(model, dls)
 # _ = Parallel(n_jobs=mp.cpu_count())(
@@ -128,7 +123,7 @@ def update_row_id(row, levels):
     return f"{row['study_id']}_{row['condition']}_{level}"
 
 
-print(expanded_test_desc)
+# print(expanded_test_desc.to_string())
 # Update row_id in expanded_test_desc to include levels
 expanded_test_desc['row_id'] = expanded_test_desc.apply(lambda row: update_row_id(row, levels), axis=1)
 expanded_test_desc[["normal_mild", "moderate", "severe"]] = preds
@@ -140,4 +135,4 @@ final_df = final_df.groupby('row_id').sum().reset_index()
 # normalize the columns
 final_df[target_cols[1:]] = final_df[target_cols[1:]].div(final_df[target_cols[1:]].sum(axis=1), axis=0)
 final_df[target_cols].to_csv('submission.csv', index=False)
-print(pd.read_csv('submission.csv'))
+print(pd.read_csv('submission.csv').to_string())

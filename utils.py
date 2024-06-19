@@ -5,7 +5,6 @@ import random
 import pandas as pd
 import numpy as np
 import torch
-import torchvision.transforms as transforms
 import pydicom
 
 from config import CONFIG
@@ -98,25 +97,3 @@ def load_dicom(path):
         data = data / np.max(data)
     data = (data * 255).astype(np.uint8)
     return data
-
-
-def get_transforms(height, width):
-    train_tsfm = transforms.Compose([
-        transforms.Lambda(lambda x: (x * 255).astype(np.uint8)),  # Convert back to uint8 for PIL
-        transforms.ToPILImage(),
-        transforms.Resize((height, width)),
-        transforms.Grayscale(num_output_channels=3),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomRotation(degrees=(0, 30)),
-        transforms.ToTensor(),
-    ])
-
-    valid_tsfm = transforms.Compose([
-        transforms.Lambda(lambda x: (x * 255).astype(np.uint8)),  # Convert back to uint8 for PIL
-        transforms.ToPILImage(),
-        transforms.Resize((height, width)),
-        transforms.Grayscale(num_output_channels=3),
-        transforms.ToTensor(),
-    ])
-
-    return {"train": train_tsfm, "eval": valid_tsfm}

@@ -1,14 +1,14 @@
-import cv2
-import warnings
-from torch.utils.data import DataLoader, Dataset
-from torch.utils.data import WeightedRandomSampler
-import os, gc
-from pathlib import Path
+import os
 from tqdm.auto import tqdm
-import random
 import pandas as pd
 import numpy as np
 import torch
+import cv2
+import warnings
+
+from pathlib import Path
+import random
+from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as transforms
 import pydicom
 import torch.nn as nn
@@ -17,14 +17,15 @@ import timm
 # replace this parts with the scripts
 CONFIG = dict(
     project_name="PL-RSNA-2024-Lumbar-Spine-Classification",
-    weights_path="data/efficientnet_b0.ra_in1k.pth",
+    weights_path="data/efficientnet_b0-0.pth",
     # data_path="/kaggle/input/rsna-2024-lumbar-spine-degenerative-classification",
     data_path="/mnt/Cache/rsna-2024-lumbar-spine-degenerative-classification",
     artifact_name="rsnaEffNetModel",
     load_kernel=None,
     load_last=True,
     n_folds=5,
-    backbone="efficientnet_b0.ra_in1k",  # tf_efficientnetv2_s_in21ft1k
+    backbone="efficientnet_b0",  # tf_efficientnetv2_s_in21ft1k
+    # backbone="efficientnet_b0.ra_in1k",  # tf_efficientnetv2_s_in21ft1k
     img_size=384,
     n_slice_per_c=16,
     in_chans=1,
@@ -34,7 +35,7 @@ CONFIG = dict(
     drop_path_rate=0.,
     p_mixup=0.5,
     p_rand_order_v1=0.2,
-    lr=1e-3,
+    lr=1e-5,
 
     out_dim=3,
     epochs=2,
@@ -44,37 +45,7 @@ CONFIG = dict(
 
     patience=7,
 )
-
-# DATA_PATH = Path("/kaggle/input/rsna-2024-lumbar-spine-degenerative-classification")
 DATA_PATH = Path(CONFIG["data_path"])
-
-
-def get_image_paths(row, base_path=None):
-    if base_path is None:
-        base_path = f"{str(DATA_PATH)}/train_images/"
-    series_path = os.path.join(base_path, str(row['study_id']), str(row['series_id']))
-    if os.path.exists(series_path):
-        return [
-            os.path.join(series_path, f) for f in os.listdir(series_path) if os.path.isfile(os.path.join(series_path, f))
-        ]
-    return []
-
-
-# Define function to reshape a single row of the DataFrame
-def reshape_row(row):
-    data = {'study_id': [], 'condition': [], 'level': [], 'severity': []}
-
-    for column, value in row.items():
-        if column not in ['study_id', 'series_id', 'instance_number', 'x', 'y', 'series_description']:
-            parts = column.split('_')
-            condition = ' '.join([word.capitalize() for word in parts[:-2]])
-            level = parts[-2].capitalize() + '/' + parts[-1].capitalize()
-            data['study_id'].append(row['study_id'])
-            data['condition'].append(condition)
-            data['level'].append(level)
-            data['severity'].append(value)
-
-    return pd.DataFrame(data)
 
 
 def seeding(SEED):
@@ -87,40 +58,22 @@ def seeding(SEED):
         torch.cuda.manual_seed_all(SEED)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-#     os.environ['TF_CUDNN_DETERMINISTIC'] = str(SEED)
-#     tf.random.set_seed(SEED)
-#     keras.utils.set_random_seed(seed=SEED)
+    #     os.environ['TF_CUDNN_DETERMINISTIC'] = str(SEED)
+    #     tf.random.set_seed(SEED)
+    #     keras.utils.set_random_seed(seed=SEED)
     print('seeding done!!!')
 
 
-def flush():
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-
-
-# Define a function to check if a path exists
-def check_exists(path):
-    return os.path.exists(path)
-
-# Define a function to check if a study ID directory exists
-def check_study_id(row):
-    study_id = row['study_id']
-    path = f'{str(DATA_PATH)}/train_images/{study_id}'
-    return check_exists(path)
-
-# Define a function to check if a series ID directory exists
-def check_series_id(row):
-    study_id = row['study_id']
-    series_id = row['series_id']
-    path = f'{str(DATA_PATH)}/train_images/{study_id}/{series_id}'
-    return check_exists(path)
-
-# Define a function to check if an image file exists
-def check_image_exists(row):
-    image_path = row['image_path']
-    return check_exists(image_path)
+def get_image_paths(row, base_path=None):
+    if base_path is None:
+        base_path = f"{str(DATA_PATH)}/train_images/"
+    series_path = os.path.join(base_path, str(row['study_id']), str(row['series_id']))
+    if os.path.exists(series_path):
+        return [
+            os.path.join(series_path, f) for f in os.listdir(series_path) if
+            os.path.isfile(os.path.join(series_path, f))
+        ]
+    return []
 
 
 def load_dicom(path):
@@ -133,32 +86,17 @@ def load_dicom(path):
     return data
 
 
-def get_transforms(height, width):
-    train_tsfm = transforms.Compose([
-        transforms.Lambda(lambda x: (x * 255).astype(np.uint8)),  # Convert back to uint8 for PIL
-        transforms.ToPILImage(),
-        transforms.Resize((height, width)),
-        transforms.Grayscale(num_output_channels=3),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomRotation(degrees=(0, 30)),
-        transforms.ToTensor(),
-    ])
-
-    valid_tsfm = transforms.Compose([
-        transforms.Lambda(lambda x: (x * 255).astype(np.uint8)),  # Convert back to uint8 for PIL
-        transforms.ToPILImage(),
-        transforms.Resize((height, width)),
-        transforms.Grayscale(num_output_channels=3),
-        transforms.ToTensor(),
-    ])
-
-    return {"train": train_tsfm, "eval": valid_tsfm}
-
-
-class CustomDataset(Dataset):
-    def __init__(self, dataframe, transform=None, label_name='target'):
+class CustomDatasetInference(Dataset):
+    def __init__(self, dataframe, size, label_name='target'):
+        height, width = size
         self.dataframe = dataframe
-        self.transform = transform
+        self.transform = transforms.Compose([
+            transforms.Lambda(lambda x: (x * 255).astype(np.uint8)),  # Convert back to uint8 for PIL
+            transforms.ToPILImage(),
+            transforms.Resize((height, width)),
+            transforms.Grayscale(num_output_channels=3),
+            transforms.ToTensor(),
+        ])
         self.label = dataframe.loc[:, label_name]
 
     def __len__(self):
@@ -170,7 +108,10 @@ class CustomDataset(Dataset):
         target = self.dataframe['target'][index]
 
         if self.transform:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
             image = self.transform(image)
+            # print(image.shape)
+            # image = image.transpose(2, 0, 1).astype(np.float32) / 255.
 
         return image, torch.tensor(target).float()
 
@@ -178,42 +119,19 @@ class CustomDataset(Dataset):
         return self.label
 
 
-def get_dataloaders(data, cfg, split="train"):
+def get_test_dataloaders(data, cfg):
     img_size = cfg['img_size']
-    height, width = img_size, img_size
-    tsfm = get_transforms(height=height, width=width)
-    if split == 'train':
-        tr_tsfm = tsfm['train']
-        ds = CustomDataset(data, transform=tr_tsfm)
-        labels = ds.get_labels()
-        #         class_weights = torch.tensor(compute_class_weight(class_weight="balanced", classes=np.unique(labels), y=labels))
-        class_weights = torch.tensor([1, 2, 4])
-        samples_weights = class_weights[labels]
-        #         print(class_weights)
-        sampler = WeightedRandomSampler(weights=samples_weights,
-                                        num_samples=len(samples_weights),
-                                        replacement=True)
+    size = (img_size, img_size)
 
-        dls = DataLoader(ds,
-                         batch_size=cfg['batch_size'],
-                         sampler=sampler,
-                         num_workers=os.cpu_count(),
-                         drop_last=True,
-                         pin_memory=True)
-
-    elif split == 'valid' or split == 'test':
-        eval_tsfm = tsfm['eval']
-        ds = CustomDataset(data, transform=eval_tsfm)
-        dls = DataLoader(
-            ds,
-            batch_size=2 * cfg['batch_size'],
-            shuffle=False,
-            num_workers=os.cpu_count(),
-            drop_last=False,
-            pin_memory=True
-        )
-    else:
-        raise Exception("Split should be 'train' or 'valid' or 'test'!!!")
+    ds = CustomDatasetInference(data, size)
+    dls = DataLoader(
+        ds,
+        batch_size=2 * cfg['batch_size'],
+        shuffle=False,
+        num_workers=os.cpu_count(),
+        drop_last=False,
+        pin_memory=True
+    )
     return dls
 
 
@@ -229,7 +147,7 @@ class TimmModel(nn.Module):
             drop_path_rate=CONFIG["drop_path_rate"],
             pretrained=pretrained
         )
-
+        hdim = 1
         if 'efficient' in backbone:
             hdim = self.encoder.conv_head.out_channels
             self.encoder.classifier = nn.Identity()
@@ -255,6 +173,10 @@ class TimmModel(nn.Module):
     def save_state_dict(self, path):
         torch.save(self.state_dict(), path)
 
+    def load_state_dict_from_path(self, path):
+        weights = torch.load(path)
+        self.load_state_dict(weights)
+
 
 warnings.filterwarnings("ignore")
 cv2.setNumThreads(0)
@@ -264,8 +186,6 @@ seeding(CONFIG['seed'])
 os.listdir(DATA_PATH)
 sample_df = pd.read_csv(DATA_PATH / "sample_submission.csv")
 test_desc = pd.read_csv(DATA_PATH / "test_series_descriptions.csv")
-train_desc = pd.read_csv(DATA_PATH / "train_series_descriptions.csv")
-train_main = pd.read_csv(DATA_PATH / "train.csv")
 # define the base path for test images
 base_path = f"{str(DATA_PATH)}/test_images"
 
@@ -281,15 +201,12 @@ expanded_rows = []
 
 # Expand the dataframe by adding new rows for each file path
 for index, row in test_desc.iterrows():
-    # print(index, row)
     image_paths = get_image_paths(row, base_path)
     conditions = condition_mapping.get(row['series_description'], {})
     if isinstance(conditions, str):  # Single condition
         conditions = {'left': conditions, 'right': conditions}
     for side, condition in conditions.items():
-        print("side", side, condition, image_paths)
         for image_path in image_paths:
-            print(image_path)
             expanded_rows.append({
                 'study_id': row['study_id'],
                 'series_id': row['series_id'],
@@ -301,7 +218,7 @@ for index, row in test_desc.iterrows():
 
 # Create a new dataframe from the expanded rows
 expanded_test_desc = pd.DataFrame(expanded_rows)
-print(expanded_test_desc)
+# print(expanded_test_desc.to_string())
 test_data = expanded_test_desc.copy()
 test_data['target'] = 0
 test_data.head()
@@ -355,7 +272,7 @@ weights = torch.load(weights_path, map_location=torch.device("cpu"))
 model = TimmModel(backbone=CONFIG["backbone"], pretrained=False)
 model.load_state_dict(weights)
 
-dls = get_dataloaders(test_data, CONFIG, split="test")
+dls = get_test_dataloaders(test_data, CONFIG)
 # inference_loop(model, dls)
 tta_inference_loop(model, dls)
 # _ = Parallel(n_jobs=mp.cpu_count())(
@@ -372,7 +289,7 @@ def update_row_id(row, levels):
     return f"{row['study_id']}_{row['condition']}_{level}"
 
 
-print(expanded_test_desc)
+# print(expanded_test_desc.to_string())
 # Update row_id in expanded_test_desc to include levels
 expanded_test_desc['row_id'] = expanded_test_desc.apply(lambda row: update_row_id(row, levels), axis=1)
 expanded_test_desc[["normal_mild", "moderate", "severe"]] = preds
@@ -384,4 +301,4 @@ final_df = final_df.groupby('row_id').sum().reset_index()
 # normalize the columns
 final_df[target_cols[1:]] = final_df[target_cols[1:]].div(final_df[target_cols[1:]].sum(axis=1), axis=0)
 final_df[target_cols].to_csv('submission.csv', index=False)
-print(pd.read_csv('submission.csv'))
+print(pd.read_csv('submission.csv').to_string())

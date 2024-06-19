@@ -11,7 +11,7 @@ from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from config import CONFIG
 from utils import get_image_paths, reshape_row, seeding, check_image_exists, check_series_id, check_study_id, DATA_PATH
 from models import LumbarLightningModel
-from dataset import get_dataloaders
+from dataset import get_train_dataloaders, get_test_dataloaders
 
 import cv2
 import warnings
@@ -102,6 +102,10 @@ id2series = {v: k for k, v in series2id.items()}
 train_data['series2id'] = train_desc['series_description'].map(series2id)
 train_data = train_data.dropna(subset=['series2id']).reset_index(drop=True)
 
+train_data, test_data = model_selection.train_test_split(train_data, test_size=0.1)
+train_data = train_data.reset_index(drop=True)
+test_data = test_data.reset_index(drop=True)
+
 kfold = model_selection.StratifiedKFold(n_splits=5, shuffle=True, random_state=2024)
 x = train_data.index.values
 y = train_data['target'].values.astype(int)
@@ -111,33 +115,38 @@ train_data['fold'] = -1
 for fold, (tr_idx, val_idx) in enumerate(kfold.split(x, y)):
     train_data.loc[val_idx, 'fold'] = fold
 
+train = True
+
 for fold in range(5):
     train_ds = train_data[train_data['fold'] != fold].reset_index(drop=True)
     valid_ds = train_data[train_data['fold'] == fold].reset_index(drop=True)
 
-    train_loader = get_dataloaders(train_ds, CONFIG, split="train")
-    valid_loader = get_dataloaders(valid_ds, CONFIG, split="valid")
-
+    train_loader = get_train_dataloaders(train_ds, CONFIG)
+    valid_loader = get_test_dataloaders(valid_ds, CONFIG)
     logger = TensorBoardLogger(
-        save_dir="data/logs"
+        save_dir="data/logs",
+        name=f"folds",
+        version=f"fold-{fold}-{CONFIG["backbone"]}"
     )
 
     callbacks = [
-        ModelCheckpoint(
-            dirpath="data/model_checkpoint",
-            save_weights_only=True,
-            mode="min",
-            monitor="valid_loss"
-        ),
+        # ModelCheckpoint(
+        #     dirpath="data/model_checkpoint",
+        #     save_weights_only=True,
+        #     mode="min",
+        #     monitor="valid_loss"
+        # ),
         LearningRateMonitor("epoch"),
-        EarlyStopping(monitor="valid_loss", min_delta=0.0, patience=CONFIG['patience'], verbose=False, mode="min"),
+        # EarlyStopping(monitor="valid_loss", min_delta=0.0, patience=CONFIG['patience'], verbose=False, mode="min"),
     ]
 
     net = LumbarLightningModel()
+    if not train:
+        net.load(CONFIG["weights_path"])
 
     trainer = pl.Trainer(
         accelerator="gpu",
-        devices=2,
+        devices=1,
         precision="16-mixed",
         max_epochs=CONFIG['epochs'],
         logger=logger,
@@ -145,6 +154,14 @@ for fold in range(5):
         default_root_dir=os.getcwd()
     )
 
-    trainer.fit(net, train_dataloaders=train_loader, val_dataloaders=valid_loader)
-    trainer.model.save(CONFIG["weights_path"])
+    if train:
+        trainer.fit(net, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+        trainer.model.save(f"data/{CONFIG["backbone"]}-{fold}.pth")
+
+    print("testing")
+    test_loader = get_test_dataloaders(test_data, CONFIG)
+    print(test_data.head().to_string())
+    batch_images, batch_labels = next(test_loader.__iter__())
+    print(batch_images.shape, batch_labels.shape)
+    trainer.test(net, test_loader)
     break
