@@ -103,7 +103,7 @@ def tta_inference_loop(model, loader):
 
 weights_path = CONFIG["weights_path"]
 weights = torch.load(weights_path, map_location=torch.device("cpu"))
-model = TimmModel(backbone=CONFIG["backbone"], pretrained=False)
+model = TimmModel(pretrained=False)
 model.load_state_dict(weights)
 
 dls = get_test_dataloaders(test_data, CONFIG)

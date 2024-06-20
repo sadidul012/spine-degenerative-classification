@@ -12,11 +12,11 @@ tqdm.pandas()
 
 
 class TimmModel(nn.Module):
-    def __init__(self, backbone, pretrained=False):
+    def __init__(self, pretrained=False):
         super(TimmModel, self).__init__()
 
         self.encoder = timm.create_model(
-            backbone,
+            CONFIG["backbone"],
             num_classes=CONFIG["out_dim"],
             features_only=False,
             drop_rate=CONFIG["drop_rate"],
@@ -24,25 +24,31 @@ class TimmModel(nn.Module):
             pretrained=pretrained
         )
         hdim = 1
-        if 'efficient' in backbone:
+        if 'efficient' in CONFIG["backbone"]:
             hdim = self.encoder.conv_head.out_channels
             self.encoder.classifier = nn.Identity()
-        elif 'convnext' in backbone:
+        elif 'convnext' in CONFIG["backbone"]:
             hdim = self.encoder.head.fc.in_features
             self.encoder.head.fc = nn.Identity()
 
-        self.lstm = nn.LSTM(hdim, 256, num_layers=2, dropout=CONFIG["drop_rate"], bidirectional=True, batch_first=True)
+        # self.lstm = nn.LSTM(hdim, 256, num_layers=2, dropout=CONFIG["drop_rate"], bidirectional=True, batch_first=True)
+        # self.head = nn.Sequential(
+        #     nn.Linear(512, 256),
+        #     nn.BatchNorm1d(256),
+        #     nn.Dropout(CONFIG["drop_rate_last"]),
+        #     nn.LeakyReLU(0.1),
+        #     nn.Linear(256, CONFIG["out_dim"]),
+        #     nn.Linear(hdim, CONFIG["out_dim"]),
+        #     nn.Sigmoid()
+        # )
         self.head = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.Dropout(CONFIG["drop_rate_last"]),
-            nn.LeakyReLU(0.1),
-            nn.Linear(256, CONFIG["out_dim"]),
+            nn.Linear(hdim, CONFIG["out_dim"]),
+            nn.Sigmoid()
         )
 
     def forward(self, x):
         feat = self.encoder(x)
-        feat, _ = self.lstm(feat)
+        # feat, _ = self.lstm(feat)
         feat = self.head(feat)
         return feat
 
@@ -58,7 +64,7 @@ class LumbarLightningModel(pl.LightningModule):
     def __init__(self, pretrained=False):
         self.save_hyperparameters()
         super().__init__()
-        self.model = TimmModel(backbone=CONFIG["backbone"], pretrained=pretrained)
+        self.model = TimmModel(pretrained=pretrained)
         class_weights = torch.tensor([1, 2, 4], dtype=torch.float32)
         self.loss_fn = nn.CrossEntropyLoss(weight=class_weights)
 
